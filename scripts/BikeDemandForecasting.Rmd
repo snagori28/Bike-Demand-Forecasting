@@ -1,0 +1,575 @@
+---
+title: "SCA_Assignment_2"
+author: "Shrijeet Nagori"
+date: "2023-04-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Author : Shrijeet Nagori
+
+# Preprocessing of data
+
+```{r}
+setwd("C:\\Users\\Shrij\\OneDrive\\Desktop\\MSTM\\Courses\\Supply chain Analytics\\Assignment 2")
+d = read.csv("BikeDemandDaily.csv")
+```
+
+```{r}
+colnames(d)
+```
+Let us convert month, season, holiday and workingday to factor variables.
+
+```{r}
+d$month = as.factor(d$month)
+d$season = as.factor(d$season)
+d$holiday = as.factor(d$holiday)
+d$workingday = as.factor(d$workingday)
+```
+
+```{r}
+summary(d)
+```
+
+# PART A: Disaggregated Demand Forecasting and aggregating up
+
+## A1: Graphical comparison of registered and casual demand
+
+### i) Plot daily registered and casual demand
+
+```{r}
+# Compute daily mean demand
+daily_mean <- aggregate(d[, c("Registered", "Casual")], list(d$Index), mean)
+
+# Plot the demand data with daily mean demand line
+plot(d$Index, d$Registered, pch = "*", col = 4, xlab = "Day Index", ylab = "Total Bike Demand",
+     main = "Plot of Demand", ylim = c(200,7000))
+points(d$Index, d$Casual, pch = "o", col = "green")
+lines(daily_mean$Group.1, rowMeans(daily_mean[, 2:3]), col = "red", lwd = 2)
+
+# Add legend
+legend("topleft", c("Registered", "Casual", "Daily Mean"), pch = c("*", "o", NA),
+       col = c(4,3,"red"), lty = c(NA, NA, 1))
+```
+
+Observations:
+
+1. Casual demand is generally lower than average daily demand.
+2. Registered demand is generally higher than average daily demand.
+3. Casual demand seems to be more dispersed than registered demand.
+4. Registered demand overall has an increasing trend.
+5. Both registered and casual demand show a clear pattern of seasonality, with peaks during the summer months and troughs during the winter months.
+
+From business perspective, there would be greater growth by focusing on registered customers.
+
+### ii) Scatter diagrams 
+
+#### a) Mean temperature versus registered and casual demand.
+```{r}
+plot(d$meanatemp, d$Registered, main="Mean Temperature vs Registered Demand", 
+     xlab="Mean Temperature", ylab="Registered Demand", col="blue")
+plot(d$meanatemp, d$Casual, main="Mean Temperature vs Casual Demand", 
+     xlab="Mean Temperature", ylab="Casual Demand", col="red")
+```
+
+#### b) Mean humidity versus registered and causal demand
+
+```{r}
+plot(d$meanhumidity, d$Registered, main="Mean Humidity vs Registered Demand", 
+     xlab="Mean Humidity", ylab="Registered Demand", col="blue")
+plot(d$meanhumidity, d$Casual, main="Mean Humidity vs Casual Demand", 
+     xlab="Mean Humidity", ylab="Casual Demand", col="red")
+```
+
+#### c) Maximum wind speed versus registered and casual demand
+
+```{r}
+plot(d$maxwindspeed, d$Registered, main="Max Wind Speed vs Registered Demand", 
+     xlab="Max Wind Speed", ylab="Registered Demand", col="blue")
+plot(d$maxwindspeed, d$Casual, main="Max Wind Speed vs Casual Demand", 
+     xlab="Max Wind Speed", ylab="Casual Demand", col="red")
+```
+
+#### d) Standard deviation of wind speed versus registered and casual demand
+
+```{r}
+plot(d$sdwindspeed, d$Registered, main="Standard Deviation of Wind Speed vs Registered Demand", 
+     xlab="Standard Deviation of Wind Speed", ylab="Registered Demand", col="blue")
+plot(d$sdwindspeed, d$Casual, main="Standard Deviation of Wind Speed vs Casual Demand", 
+     xlab="Standard Deviation of Wind Speed", ylab="Casual Demand", col="red")
+```
+
+#### e) Comments on the observations
+
+1. Mean temperature seems to be positively correlated with both registered and casual demand. Higher temperatures lead to more demand for bike rentals.
+2. Mean humidity doesn't seem to have a clear correlation with either registered or casual demand.
+3. Maximum wind speed and standard deviation of wind speed appears to have a very weak negative correlation with both registered and casual demand. As wind speed increases, demand for bike rentals decreases.
+
+### iii) Box plots
+
+#### a) Registered demand v/s holiday
+
+```{r}
+boxplot(Registered ~ holiday, data = d, xlab = "Holiday", 
+        ylab = "Registered Demand", main = "Registered Demand vs Holiday")
+```
+
+On non-holidays, the registered demand tends to have higher median values compared to holidays.
+
+#### b) Casual demand v/s holiday
+
+```{r}
+boxplot(Casual ~ holiday, data = d, xlab = "Holiday", ylab = "Casual Demand", main = "Casual Demand vs Holiday")
+```
+
+On holidays, the casual demand tends to have higher median values, larger interquartile ranges compared to non-holidays.
+
+#### c) Registered demand v/s day of the week
+
+```{r}
+boxplot(Registered ~ day, data = d, xlab = "Day of the Week", ylab = "Registered Demand", 
+        main = "Registered Demand vs Day of the Week")
+```
+
+The registered demand tends to be highest on weekdays (Monday to Friday) and lowest on weekends (Saturday and Sunday).
+
+#### d) Causal demand versus day of the week
+
+```{r}
+boxplot(Casual ~ day, data = d, xlab = "Day of the Week", ylab = "Casual Demand", main = "Casual Demand vs Day of the Week")
+```
+
+The casual demand tends to be highest on weekends (Saturday and Sunday) and lowest on weekdays (Monday to Friday).
+
+Overall, we can observe that holidays and day of the week seem to be correlated with the demand for bikes. On holidays, there may be more tourists or visitors who are unfamiliar with the city, leading to a decrease in registered demand but an increase in casual demand. On weekdays, people may be using bikes more for commuting, leading to a higher registered demand, while on weekends, people may be using bikes more for leisure activities, leading to a higher casual demand.
+
+## A2: Lasso Model for registered demand and casual demand separately.
+
+### i) Split the sample based on day Index. Observations below or equal to 300 --> train and remaining in test set.
+
+```{r}
+#We use the first 300 days of observations as training and the remaining days for testing.
+ind = c(1:300)
+```
+
+### ii) Follow the class code to set up the cross-validation for registered and casual demand separately.Report the optimal cross-validation penalty for both models. Use the training set only.
+
+```{r}
+library(glmnet)
+```
+
+#### Registered and casual demand
+
+```{r}
+#We use only the factor variables here.
+m1 = lm(log(Registered)~Index+season+holiday+workingday, data = d)
+m2 = lm(log(Casual)~Index+season+holiday+workingday, data = d)
+
+x1 = model.matrix(m1)
+x2 = model.matrix(m2)
+
+x1 = cbind(x1, as.matrix(d[,c(8:19)]))
+x2 = cbind(x2, as.matrix(d[,c(8:19)]))
+
+y1 = log(d$Registered)
+y2 = log(d$Casual)
+  
+#Using the fitted regression model, create the X matrix using the function model.matrix().
+trainx_registered = x1[ind,]
+trainx_casual = x2[ind,]
+testx_registered = x1[-ind,]
+testx_casual = x2[-ind,]
+
+#Create the column of response variable - logarithm of registered and casual demand in this case.
+trainy_registered = y1[ind]
+trainy_casual = y2[ind]
+testy_registered = y1[-ind]
+testy_casual = y2[-ind]
+
+#First, we use the cv.glmnet function to estimate the optimal penalty. cv.glmnet() takes the X matrix and the corresponding y vector and performs the cross validation procedure. It returns the model and the optimal penalty, accessible by the model parameter lambda.min.
+l1 = cv.glmnet(trainx_registered, trainy_registered)
+l2 = cv.glmnet(trainx_casual, trainy_casual)
+
+#This shows the CV error versus log of lambda.
+plot(l1)
+plot(l2)
+```
+
+```{r}
+#Returns the optimal penalty that minimizes the CV error.
+#Note that we have used on the training data set for estimating the cross validation error and the optimal penalty.
+print(l1$lambda.min)
+print(l2$lambda.min)
+```
+### (iii) Construct the final LASSO model using the optimal penalty found at the cross-validation stage.Comment on the selected variables. Again, use the training set only.
+
+```{r}
+l3 = glmnet(trainx_registered, trainy_registered, lambda = l1$lambda.min)
+l4 = glmnet(trainx_casual, trainy_casual, lambda = l2$lambda.min)
+```
+
+```{r}
+l3$beta
+```
+```{r}
+l4$beta
+```
+### iv) Predict the testing set. Report the Root Mean Squared Error (RMSE) on the testing set.
+
+```{r}
+#RMSE function - takes observed values and predicted values as input and returns the root mean squared values. 
+RMSE = function(o, p){
+  e = o-p
+  e2 = e^2
+  rmse = sqrt(mean(e2))
+  return(rmse)
+}
+
+# Predict the past and future for registered customers.
+p1 = predict(l3, newx = trainx_registered)
+p2 = predict(l3, newx = testx_registered)
+
+print(RMSE(testy_registered, p2))
+```
+```{r}
+# Predict the past and future for casual customers.
+p3 = predict(l4, newx = trainx_casual)
+p4 = predict(l4, newx = testx_casual)
+
+print(RMSE(testy_casual, p4))
+```
+```{r}
+#Plot the predicted versus the observed values for both training and testing sets for registered customers.
+plot(d$Index, d$Registered, col = 4, pch="o")
+points(trainx_registered[,2], exp(p1), col = 3, pch = "*")
+points(testx_registered[,2], exp(p2), col = 2, pch = "*")
+legend("topleft", legend = c("Training Predictions",
+                             "Testing Predictions",
+                             "Observations"),
+       col = c(3,2,4), pch = c("*","*","o"))
+```
+
+```{r}
+#Plot the predicted versus the observed values for both training and testing sets for registered customers.
+plot(d$Index, d$Casual, col = 4, pch="o")
+points(trainx_casual[,2], exp(p3), col = 3, pch = "*")
+points(testx_casual[,2], exp(p4), col = 2, pch = "*")
+legend("topleft", legend = c("Training Predictions",
+                             "Testing Predictions",
+                             "Observations"),
+       col = c(3,2,4), pch = c("*","*","o"))
+```
+
+## A3: Time series prediction - Auto regressive moving average (ARMA)
+
+### i) Using the variables selected by the LASSO Models create linear regression models using the training set for both registered and casual demand. Report the summary of the regression and comment on the important predictors for both registered and causal demand.
+
+```{r}
+#Load the packages
+library(nlme)
+library(car)
+```
+
+```{r}
+train = d[ind,]
+test = d[-ind,]
+
+#Create a OLS estimate
+m3 = lm(log(Registered)~Index+season+workingday+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+maxwindspeed+minwindspeed+
+         sdwindspeed, data = train)
+
+m4 = lm(log(Casual)~Index+season+holiday+workingday+meanatemp+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+maxwindspeed+minwindspeed, data = train)
+```
+
+```{r}
+summary(m3)
+```
+The regression model has an Adjusted R-squared of 0.8231, which means the model explains around 82% of the variation in the registered demand. The intercept has a significant estimate of 7.15, which implies that even if all predictor variables have zero values, there will be some registered demand.
+
+The most important predictor variable is the day index, with a positive estimate of 0.0031725, indicating that registered demand increases with time. Season 2 (summer) and workingday also have a significant positive impact on registered demand, while season 3 (fall) and minhumidity have a negative impact. The minimum and standard deviation of temperature have a positive effect, while meanhumidity and sdwindspeed have no significant impact on registered demand.
+
+```{r}
+summary(m4)
+```
+The regression model has a high R-squared value of 0.8228, indicating that the model explains 82.28% of the variance in the casual demand. The important predictors for casual demand are:
+
+1. Workingday: This predictor has a strong negative coefficient (-1.0141996), indicating that the casual demand is lower on working days compared to non-working days.
+
+2. Index: This predictor has a positive coefficient (0.0024112), indicating that casual demand increases with the increase in the index value.
+
+3. Season: The season predictor has a significant effect on casual demand. Among the four seasons, season 2 (summer) has the highest positive coefficient (0.5042890), followed by season 3 (fall) with a lower positive coefficient (0.1484178), and season 4 (winter) with a positive coefficient (0.1215118). The reference season is season 1 (spring).
+
+4. Maxwindspeed: This predictor has a negative coefficient (-0.0147319), indicating that the casual demand decreases with an increase in maximum wind speed.
+
+5. Sdatemp: This predictor has a positive coefficient (0.1620383), indicating that the casual demand increases with an increase in the standard deviation of the temperature.
+
+6. Minatemp: This predictor has a positive coefficient (0.0684700), indicating that the casual demand increases with an increase in the minimum temperature.
+
+Other predictors such as holiday, meanatemp, meanhumidity, minhumidity, sdhumidity, and minwindspeed are not statistically significant in predicting casual demand.
+
+### ii) Use the residuals of the regression models to plot the Autocorrelation Function for both types of demand (ACF). Which demand type demonstrates greater auto-correlation? Why?
+
+```{r}
+# Registered customers
+e1 = m3$residuals
+ar1 = acf(e1)
+plot(ar1)
+```
+
+```{r}
+ar1$acf[1:10]
+```
+```{r}
+# Casual customers
+e2 = m4$residuals
+ar2 = acf(e2)
+plot(ar2)
+```
+
+```{r}
+ar2$acf[1:10]
+```
+The casual demand greater autocorrelation as it is likely to to be affected by more unpredictable factors (e.g. weather, events) compared to registered demand, which may have more consistent patterns (e.g. daily commute)
+
+### iii) Fit an ARMA(2,2) time-series model on the training set for both registered and casual demand.Report the summary.
+
+```{r}
+# Registered demand
+
+#Create the GLS estimate
+m5 = gls(log(Registered)~Index+season+workingday+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+maxwindspeed+minwindspeed+
+         sdwindspeed, data = train,
+         correlation = corARMA(p=2, q=2), method = "ML")
+
+summary(m5)
+```
+```{r}
+# Casual demand
+
+#Create the GLS estimate
+m6 = gls(log(Casual)~Index+season+holiday+workingday+meanatemp+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+maxwindspeed+minwindspeed, data = train,
+         correlation = corARMA(p=2, q=2), method = "ML")
+
+summary(m6)
+
+```
+### iv) Predict the demand for registered and causal customers for the testing set. Aggregate the individual demands to create the total demand forecast. Report the RMSE.
+
+```{r}
+# Prediction of registered demand
+p5 = predict(m5, newdata = test)
+
+RMSE(log(test$Registered), p5)
+```
+```{r}
+# Prediction of casual demand
+
+p6 = predict(m6, newdata = test)
+
+RMSE(log(test$Casual), p6)
+```
+```{r}
+# Plot of registered demand predictions
+plot(d$Index, log(d$Registered), col = 4)
+points(test$Index, p5, col=2)
+```
+
+```{r}
+# Plot of casual demand predictions
+plot(d$Index, log(d$Casual), col = 4)
+points(test$Index, p6, col=2)
+```
+
+```{r}
+## Aggregate the predicted demand to get total predicted demand
+
+p7 <- exp(p5) + exp(p6)
+
+test$total_demand_predicted <- as.data.frame(p7)
+```
+
+```{r}
+## RMSE for aggregated predicted demand and actual total demand
+
+RMSE(test$Total, p7)
+```
+The total predicted demand seems to be overpredicting the actual demand.
+
+# Part B: Aggregate Demand Forecasting
+
+## B_A2: Lasso Model for total demand.
+
+```{r}
+#We use only the factor variables here.
+m7 = lm(log(Total)~Index+season+holiday+workingday, data = d)
+
+x3 = model.matrix(m7)
+
+x3 = cbind(x3, as.matrix(d[,c(8:19)]))
+
+y3 = log(d$Total)
+  
+#Using the fitted regression model, create the X matrix using the function model.matrix().
+trainx = x3[ind,]
+testx = x3[-ind,]
+
+#Create the column of response variable - logarithm of registered and casual demand in this case.
+trainy = y3[ind]
+testy = y3[-ind]
+
+#First, we use the cv.glmnet function to estimate the optimal penalty. cv.glmnet() takes the X matrix and the corresponding y vector and performs the cross validation procedure. It returns the model and the optimal penalty, accessible by the model parameter lambda.min.
+l5 = cv.glmnet(trainx, trainy)
+
+#This shows the CV error versus log of lambda.
+plot(l5)
+```
+
+```{r}
+#Returns the optimal penalty that minimizes the CV error.
+#Note that we have used on the training data set for estimating the cross validation error and the optimal penalty.
+print(l5$lambda.min)
+```
+
+### (iii) Construct the final LASSO model using the optimal penalty found at the cross-validation stage.Comment on the selected variables. Again, use the training set only.
+
+```{r}
+l6 = glmnet(trainx, trainy, lambda = l5$lambda.min)
+```
+
+```{r}
+l6$beta
+```
+
+### iv) Predict the testing set. Report the Root Mean Squared Error (RMSE) on the testing set.
+
+```{r}
+# Predict the past and future for total customers.
+p5 = predict(l6, newx = trainx)
+p6 = predict(l6, newx = testx)
+
+print(RMSE(testy, p6))
+```
+```{r}
+#Plot the predicted versus the observed values for both training and testing sets for total customers.
+plot(d$Index, d$Total, col = 4, pch="o")
+points(trainx[,2], exp(p5), col = 3, pch = "*")
+points(testx[,2], exp(p6), col = 2, pch = "*")
+legend("topleft", legend = c("Training Predictions",
+                             "Testing Predictions",
+                             "Observations"),
+       col = c(3,2,4), pch = c("*","*","o"))
+```
+
+## B_A3: Time series prediction - Auto regressive moving average (ARMA)
+
+### i) Using the variables selected by the LASSO Models create linear regression models using the training set for total demand. Report the summary of the regression and comment on the important predictors for total demand.
+
+```{r}
+train_total = d[ind,]
+test_total = d[-ind,]
+
+#Create a OLS estimate
+m8 = lm(log(Total)~Index+season+holiday+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+meanwindspeed+maxwindspeed+
+         sdwindspeed, data = train_total)
+```
+
+```{r}
+summary(m8)
+```
+The regression model has an Adjusted R-squared of 0.8171, which means the model explains around 81% of the variation in the total demand. The intercept has a significant estimate of 7.40, which implies that even if all predictor variables have zero values, there will be some registered demand.
+
+In this case, the most important predictor variables are:
+
+Index (p-value < 2e-16)
+season2 (p-value = 1.17e-08)
+minatemp (p-value < 2e-16)
+sdatemp (p-value = 0.000218)
+maxwindspeed (p-value = 0.041134)
+
+These variables have statistically significant effects on the response variable and are likely to be the most important predictors in the model.
+
+### ii) Use the residuals of the regression models to plot the Autocorrelation Function for both types of demand (ACF). Which demand type demonstrates greater auto-correlation? Why?
+
+```{r}
+# Total customers
+e3 = m8$residuals
+ar3 = acf(e3)
+plot(ar3)
+```
+
+```{r}
+ar3$acf[1:10]
+```
+
+### iii) Fit an ARMA(2,2) time-series model on the training set for both registered and casual demand.Report the summary.
+
+```{r}
+# Total demand
+
+#Create the GLS estimate
+m9 = gls(log(Total)~Index+season+holiday+
+         minatemp+sdatemp+meanhumidity+minhumidity+
+         sdhumidity+meanwindspeed+maxwindspeed+
+         sdwindspeed, data = train_total,
+         correlation = corARMA(p=2, q=2), method = "ML")
+
+summary(m9)
+```
+
+### iv) Predict the demand for total customers for the testing set.
+
+```{r}
+# Prediction of total demand
+p8 = predict(m9, newdata = test_total)
+
+RMSE(log(test_total$Total), p8)
+```
+
+```{r}
+# Plot of total demand predictions
+plot(d$Index, log(d$Total), col = 4)
+points(test_total$Index, p8, col=2)
+```
+
+```{r}
+#RMSE between total actual demand and predicted demand
+
+RMSE(test_total$Total,exp(p8))
+```
+
+# Calculating RMSE for Aggregated demand and disaggregated demand
+
+```{r}
+RMSE(p7, exp(p8))
+```
+# Ploting graph for aggregated predicted demand and disaggregated predicted demand
+
+```{r}
+plot(d$Index, d$Total, col = 4, pch="o")
+points(test[,1], p7, col = 3, pch = "*")
+points(test_total[,1], exp(p8), col = 2, pch = "*")
+legend("topleft", legend = c("Disaggregated demand prediction",
+                             "Aggregated demand prediction",
+                             "Observations"),
+       col = c(3,2,4), pch = c("*","*","o"))
+```
+
+Based on RMSE values, the RMSE for disaggregated prediction was 2881.816 whereas it was 2665.552 for aggregated prediction's which mean's aggregate predictions seems to be more precise. 
+
+The reason why the aggregated prediction model may be more precise is that it can capture the overall trend and seasonal patterns better, while smoothing out the noise and randomness of the data. Disaggregated prediction models may have a higher RMSE because they are more sensitive to the noise and randomness of the data, and may overfit the model to the idiosyncrasies of the data.
+
+
+
